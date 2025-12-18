@@ -3,9 +3,8 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const helmet = require('helmet');
-// const mongoSanitize = require('express-mongo-sanitize');
 const rateLimit = require('express-rate-limit');
-// const xss = require('xss-clean');
+const axios = require('axios'); // ⚠️ Used for SSRF
 require('dotenv').config();
 
 const authRoutes = require('./routes/auth');
@@ -16,32 +15,19 @@ const userRoutes = require('./routes/users');
 
 const app = express();
 
-// Security Middleware
-app.use(helmet()); // Set security HTTP headers
+// ---------------- Security Middleware ----------------
+app.use(helmet());
 
-// Body parser
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// app.use(xss()); // Sanitize user input from XSS
-
-// app.use(mongoSanitize({
-//   onSanitize: ({ req, key }) => {
-//     console.log(`Sanitized ${key}`);
-//   },
-//   replaceWith: '_',
-//   ignoreQuery: true
-// })); // Prevent NoSQL injection
-
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   message: 'Too many requests from this IP, please try again later.'
 });
 app.use('/api/', limiter);
-
-
 
 // CORS
 app.use(cors({
@@ -49,24 +35,54 @@ app.use(cors({
   credentials: true
 }));
 
-// Database connection
+// ---------------- Database ----------------
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/ecommerce')
   .then(() => console.log('MongoDB connected'))
   .catch(err => console.error('MongoDB connection error:', err));
 
-// Routes
+// ---------------- Routes ----------------
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/users', userRoutes);
 
-// ❌ BAD: Open redirect vulnerability
-app.get('/redirect', (req, res) => {
-  res.redirect(req.query.url);
+// ----------------------------------------------------
+// 🔴 SSRF VULNERABILITY (OWASP A10:2021)
+// ----------------------------------------------------
+// ❌ BAD: Accepts user-supplied URL and fetches it directly
+// ❌ No validation of internal IPs or domains
+app.get('/api/fetch-url', async (req, res) => {
+  const targetUrl = req.query.url;
+
+  if (!targetUrl) {
+    return res.status(400).json({
+      success: false,
+      message: 'URL parameter is required'
+    });
+  }
+
+  try {
+    // ⚠️ SSRF occurs here
+    const response = await axios.get(targetUrl, {
+      timeout: 5000
+    });
+
+    res.json({
+      success: true,
+      fetchedFrom: targetUrl,
+      data: response.data
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch the provided URL',
+      error: error.message
+    });
+  }
 });
 
-// Error handling middleware
+// ---------------- Error Handler ----------------
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(err.statusCode || 500).json({
