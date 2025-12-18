@@ -1,83 +1,71 @@
-// middleware/auth.js
-const jwt = require('jsonwebtoken');
-const User = require('../models/user');
+// server.js
+const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
+const helmet = require('helmet');
+// const mongoSanitize = require('express-mongo-sanitize');
+const rateLimit = require('express-rate-limit');
+// const xss = require('xss-clean');
+require('dotenv').config();
 
-// Verify JWT token
-exports.protect = async (req, res, next) => {
-  try {
-    let token;
-    
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
-    }
-    
-    if (!token) {
-      return res.status(401).json({
-        success: false,
-        message: 'Not authorized to access this route'
-      });
-    }
-    
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
-    
-    req.user = await User.findById(decoded.id);
-    
-    if (!req.user || !req.user.isActive) {
-      return res.status(401).json({
-        success: false,
-        message: 'User not found or inactive'
-      });
-    }
-    
-    next();
-  } catch (error) {
-    return res.status(401).json({
-      success: false,
-      message: 'Not authorized to access this route'
-    });
-  }
-};
+const authRoutes = require('./routes/auth');
+const productRoutes = require('./routes/products');
+const cartRoutes = require('./routes/cart');
+const orderRoutes = require('./routes/orders');
+const userRoutes = require('./routes/users');
 
-// Role-based access control
-exports.authorize = (...roles) => {
-  return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
-      return res.status(403).json({
-        success: false,
-        message: `User role '${req.user.role}' is not authorized to access this route`
-      });
-    }
-    next();
-  };
-};
+const app = express();
 
-// Check if user owns the resource (for vendors)
-exports.checkOwnership = (model) => {
-  return async (req, res, next) => {
-    try {
-      const resource = await model.findById(req.params.id);
-      
-      if (!resource) {
-        return res.status(404).json({
-          success: false,
-          message: 'Resource not found'
-        });
-      }
-      
-      // Admin can access all, vendor can only access their own
-      if (req.user.role === 'admin' || resource.vendor.toString() === req.user.id) {
-        next();
-      } else {
-        return res.status(403).json({
-          success: false,
-          message: 'Not authorized to access this resource'
-        });
-      }
-    } catch (error) {
-      return res.status(500).json({
-        success: false,
-        message: 'Server error'
-      });
-    }
-  };
-};
+// Security Middleware
+app.use(helmet()); // Set security HTTP headers
+
+// Body parser
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// app.use(xss()); // Sanitize user input from XSS
+
+// app.use(mongoSanitize({
+//   onSanitize: ({ req, key }) => {
+//     console.log(`Sanitized ${key}`);
+//   },
+//   replaceWith: '_',
+//   ignoreQuery: true
+// })); // Prevent NoSQL injection
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: 'Too many requests from this IP, please try again later.'
+});
+app.use('/api/', limiter);
+
+
+
+// CORS
+app.use(cors({
+  origin: process.env.CLIENT_URL || 'http://localhost:3000',
+  credentials: true
+}));
+
+// Database connection
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/ecommerce')
+  .then(() => console.log('MongoDB connected'))
+  .catch(err => console.error('MongoDB connection error:', err));
+
+// Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/products', productRoutes);
+app.use('/api/cart', cartRoutes);
+app.use('/api/orders', orderRoutes);
+app.use('/api/users', userRoutes);
+
+app.use((err, req, res, next) => {
+  res.status(500).json(err);
+});
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
