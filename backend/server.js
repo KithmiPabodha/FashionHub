@@ -61,6 +61,11 @@ app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/users', userRoutes);
 
+// ❌ BAD: Open redirect vulnerability
+app.get('/redirect', (req, res) => {
+  res.redirect(req.query.url);
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);

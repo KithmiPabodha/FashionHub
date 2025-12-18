@@ -185,6 +185,13 @@ router.delete('/:id', protect, authorize('vendor', 'admin'), async (req, res) =>
         message: 'Product not found'
       });
     }
+
+    // ❌ BAD: No input validation (NoSQL Injection)
+  router.get('/search', async (req, res) => {
+  const products = await Product.find(req.query);
+  res.json(products);
+});
+
     
     // Check ownership
     if (req.user.role === 'vendor' && product.vendor.toString() !== req.user._id.toString()) {
